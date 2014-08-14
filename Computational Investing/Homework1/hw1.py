@@ -1,0 +1,164 @@
+# Computational Investing Part I
+# Homework 1
+# Peng (Will) Chen
+
+
+# QSTK Imports
+import QSTK.qstkutil.qsdateutil as du
+import QSTK.qstkutil.tsutil as tsu
+import QSTK.qstkutil.DataAccess as da
+
+# Third Party Imports
+import datetime as dt
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+
+# Given start date, end date, symbols and allocations, 
+# return volatility, averate daily return, sharpe ratio and cumulative return
+def simulate(startdate, enddate, ls_symbols, ls_alloc):
+    dt_timeofday = dt.timedelta(hours = 16)
+    
+    ldt_timestamps = du.getNYSEdays(startdate, enddate, dt_timeofday)
+    
+    c_dataobj = da.DataAccess('Yahoo', cachestalltime = 0)
+    
+    ls_keys = ['open', 'high', 'low', 'close', 'volume', 'actual_close']
+    ldf_data = c_dataobj.get_data(ldt_timestamps, ls_symbols, ls_keys)
+    d_data = dict(zip(ls_keys, ldf_data))
+    
+    for s_key in ls_keys:
+        d_data[s_key] = d_data[s_key].fillna(method='ffill')
+        d_data[s_key] = d_data[s_key].fillna(method='bfill')
+        d_data[s_key] = d_data[s_key].fillna(1.0)
+        
+    na_price = d_data['close'].values
+    na_normalized_price = na_price / na_price[0,:]
+    na_port_price = np.sum(ls_alloc * na_normalized_price, 1)
+    
+    na_daily_rets = na_port_price.copy()
+    tsu.returnize0(na_daily_rets)
+    
+    vol = np.std(na_daily_rets)
+    daily_ret = np.average(na_daily_rets)
+    
+    sharpe_ratio = np.sqrt(252) * daily_ret / vol
+    cum_ret = na_port_price[-1]
+    
+    return vol, daily_ret, sharpe_ratio, cum_ret
+
+
+# bruce force optimization of portfolio 
+def optimize(startdate, enddate, ls_symbols):
+    delta = 0.1 # increment by 0.1
+    num_of_symbols = len(ls_symbols)
+    
+    # set optimal sharpe ratio to infinity 
+    opt_sharpe = 0
+    
+    trial_alloc = np.zeros(num_of_symbols)
+    
+    while odo_increment(trial_alloc, num_of_symbols, delta):
+        if np.sum(trial_alloc) == 1.0:
+            vol, daily_ret, sharpe, cum_ret = simulate(startdate, enddate, ls_symbols, trial_alloc)
+            if sharpe > opt_sharpe:
+                opt_sharpe = sharpe
+                opt_alloc = trial_alloc.copy()
+                opt_vol = vol
+                opt_daily_ret = daily_ret
+                opt_cum_ret = cum_ret
+    
+    print 'Start Date:',
+    print startdate.date()
+    print 'End Date:',
+    print enddate.date()
+    print 'Symbols:',
+    print ls_symbols
+    print 'Optimal Allocations: ', 
+    print opt_alloc
+    print 'Sharpe Ratio: ' + repr(opt_sharpe) 
+    print 'Volatility (stdev of daily return): ' + repr(opt_vol)
+    print 'Average Daily Return: ' + repr(opt_daily_ret)
+    print 'Cumulative Return: ' + repr(opt_cum_ret)
+
+    return opt_alloc, opt_vol, opt_daily_ret, opt_sharpe, opt_cum_ret
+
+def odo_increment(odo, num_of_digits, delta):
+    i = num_of_digits
+    while i != 0:
+        odo[i-1] = odo[i-1] + delta
+        if odo[i-1] <= 1.0:
+            break
+        else:
+            odo[i-1] = 0
+            i = i - 1
+    
+    if i == 0:
+        return 0
+    else:
+        return 1
+    
+# compare a portfoilo with benchmarks    
+def benchmark_comparison(startdate, enddate, ls_symbols, ls_alloc, ls_benchmarks):
+    dt_timeofday = dt.timedelta(hours = 16)
+    
+    ldt_timestamps = du.getNYSEdays(startdate, enddate, dt_timeofday)
+    
+    c_dataobj = da.DataAccess('Yahoo', cachestalltime = 0)
+    
+    ls_keys = ['open', 'high', 'low', 'close', 'volume', 'actual_close']
+    ldf_data = c_dataobj.get_data(ldt_timestamps, ls_symbols, ls_keys)
+    d_data = dict(zip(ls_keys, ldf_data))
+    
+    ldf_data_bm = c_dataobj.get_data(ldt_timestamps, ls_benchmarks, ls_keys)
+    d_data_bm = dict(zip(ls_keys, ldf_data_bm))
+    
+    for s_key in ls_keys:
+        d_data[s_key] = d_data[s_key].fillna(method='ffill')
+        d_data[s_key] = d_data[s_key].fillna(method='bfill')
+        d_data[s_key] = d_data[s_key].fillna(1.0)
+        
+        d_data_bm[s_key] = d_data_bm[s_key].fillna(method='ffill')
+        d_data_bm[s_key] = d_data_bm[s_key].fillna(method='bfill')
+        d_data_bm[s_key] = d_data_bm[s_key].fillna(1.0)
+        
+    na_price = d_data['close'].values
+    na_normalized_price = na_price / na_price[0,:]
+    na_port_price = np.sum(ls_alloc * na_normalized_price, 1)
+    na_port_price = na_port_price.reshape(len(ldt_timestamps), 1)
+    
+    na_bm_price = d_data_bm['close'].values
+    na_normalized_bm_price = na_bm_price / na_bm_price[0,:]
+    
+    na_all_price = np.append(na_normalized_bm_price, na_port_price, 1)
+    ls_all_symbols = list(ls_benchmarks)
+    ls_all_symbols.append('Portfolio')
+    
+    plt.clf()
+    plt.plot(ldt_timestamps, na_all_price)
+    plt.legend(ls_all_symbols)
+    plt.ylabel('Normalized Price')
+    plt.xlabel('Date')
+    plt.savefig('Bechmarking.pdf', format = 'pdf')
+     
+def test(a):
+    a.append(5)
+   
+def main():
+    startdate_1 = dt.datetime(2011, 1, 1)
+    enddate_1 = dt.datetime(2011, 12, 31)
+    
+    ls_symbols_1 = ['AAPL','GLD','GOOG','XOM']
+    
+    #opt_alloc, opt_vol, opt_daily_ret, opt_sharpe, opt_cum_ret = \
+    #    optimize(startdate_1, enddate_1, ls_symbols_1)
+    
+    ls_alloc_1 = [0.4, 0.4, 0, 0.2]
+    ls_benchmarks = ['$SPX','GOOG']
+    
+    benchmark_comparison(startdate_1, enddate_1, ls_symbols_1, ls_alloc_1, ls_benchmarks)
+    
+   
+if __name__ == '__main__':
+    main()
+    
